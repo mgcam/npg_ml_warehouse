@@ -1,5 +1,13 @@
 LIST OF CHANGES
 
+release 37.6
+ - delay wh loader till the run is finished so that we have time to
+   update the number of lanes in the npg_tracking db
+
+release 37.5.1
+ - DBIx batch insert does not work correctly, leaves some columns empty.
+   Reverted to per-row insert.
+
 release 37.5
  - a utility for repairing unset foreign keys from npg product table to
    the flowcell table in the ml warehouse
