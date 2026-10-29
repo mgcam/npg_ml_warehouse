@@ -2,6 +2,7 @@
 bin/npg_check_study_staging_location
 bin/npg_elembio_run2mlwarehouse
 bin/npg_elembio_run_params2mlwarehouse
+bin/npg_elembio_qc_outcomes2mlwarehouse
 bin/npg_external_report2ml_warehouse
 bin/npg_irods_locations2ml_warehouse
 bin/npg_manifest4study

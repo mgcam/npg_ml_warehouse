@@ -1,0 +1,147 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib ( -d "$Bin/../lib/perl5" ? "$Bin/../lib/perl5" : "$Bin/../lib" );
+use Readonly;
+
+use npg_qc::Schema;
+use WTSI::DNAP::Warehouse::Schema;
+
+our $VERSION = '0';
+
+Readonly::Array  my @FINAL_OUTCOMES => ('Accepted final', 'Rejected final');
+Readonly::Scalar my $MAX_LANE_NUM   => 2;
+
+my $schema = WTSI::DNAP::Warehouse::Schema->connect();
+my $run_lanes_rs = $schema->resultset('EseqRunLaneMetric');
+my $min_eb_id_run = $run_lanes_rs->search({}, {'order_by' => 'id_run'})
+                                 ->first->id_run();
+
+# Limiting 'position' value is not essential. Done here to lower the number
+# of retrieved rows.
+my $rs = npg_qc::Schema->connect()->resultset('MqcOutcomeEnt')->search(
+  {
+    'id_run' => {'>=', $min_eb_id_run},
+    'position' => {'<=', $MAX_LANE_NUM},
+    'mqc_outcome.short_desc' => {-in => \@FINAL_OUTCOMES}
+  },
+  {
+    join => 'mqc_outcome',
+    prefetch => 'mqc_outcome',
+  }
+);
+
+# Create a dictionaly of sequencing (lane) QC outcomes for all runs
+# (any platform) with run IDs over $min_eb_id_run. The dictionary will have
+# outcomes for both Elembio and non-Elembio runs.
+my $run_lane_outcomes = {};
+while (my $row = $rs->next) {
+  $run_lane_outcomes->{$row->id_run}->{$row->position} =
+    $row->is_accepted ? 1 : 0;
+};
+
+# Not all Elembio runs have QC outcomes. Assign QC outcome for lanes and
+# products where the outcome exists. 
+$schema->txn_do( sub {
+
+  while (my $row = $run_lanes_rs->next) {
+    my $outcome = $run_lane_outcomes->{$row->id_run}->{$row->lane};
+    if (defined $outcome) {
+      $row->update({qc_seq => $outcome});
+    }
+  }
+
+  my $product_rs = $schema->resultset('EseqProductMetric')->search({
+    is_sequencing_control => 0,
+    tag_index => {q[!=], 0}
+  });
+  while (my $row = $product_rs->next) {
+    my $outcome = $run_lane_outcomes->{$row->id_run}->{$row->lane};
+    if (defined $outcome) {
+      # Do not assign qc_lib column values!
+      $row->update({qc_seq => $outcome, qc => $outcome});
+    }
+  }
+});
+
+exit 0;
+
+__END__
+
+=head1 NAME
+
+npg_elembio_qc_outcomes2mlwarehouse
+
+=head1 SYNOPSIS
+
+Script to load Elembio lane-level QC outcomes from the QC database to
+C<eseq_run_lane_metrics> and C<eseq_product_metrics> tables warehouse database.
+QC outcomes that are already present in these tables might be updated.
+
+=head1 DESCRIPTION
+
+=head1 USAGE
+
+  npg_elembio_qc_outcomes2mlwarehouse
+
+=head1 REQUIRED ARGUMENTS
+
+
+=head1 OPTIONS
+
+=head1 EXIT STATUS
+
+0 if exited normally
+
+any non-zero if a fatal error occured
+
+=head1 CONFIGURATION
+
+=head1 DIAGNOSTICS
+
+=head1 DEPENDENCIES
+
+=over
+
+=item strict
+
+=item warnings
+
+=item lib
+
+=item FindBin
+
+=item Readonly
+
+=item npg_qc::Schema
+
+=item WTSI::DNAP::Warehouse::Schema 
+
+=back
+
+=head1 INCOMPATIBILITIES
+
+=head1 BUGS AND LIMITATIONS
+
+=head1 AUTHOR
+
+Marina Gourtovaia E<lt>mg8@sanger.ac.ukE<gt>
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright (C) 2026 Genome Research Ltd.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
